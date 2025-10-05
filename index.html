@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secure Medical Chatbot</title>
+    <!-- Load Tailwind CSS for modern styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Lucide Icons for aesthetic medical symbol -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        'primary-blue': '#10567A', 
+                        'secondary-green': '#A7D4C6',
+                        'bubble-user': '#DCF8C6',
+                        'bubble-bot': '#FFFFFF',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Custom scrollbar styling */
+        .chat-container::-webkit-scrollbar {
+            width: 8px;
+        }
+        .chat-container::-webkit-scrollbar-thumb {
+            background-color: #A7D4C6;
+            border-radius: 4px;
+        }
+        .chat-container::-webkit-scrollbar-track {
+            background: #F0F0F0;
+        }
+        /* New CSS Keyframe for the slide-in animation */
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        .message-animation {
+            animation: slideIn 0.3s ease-out;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center font-sans p-4">
+
+    <!-- Chatbot Container: Fixed size and centered -->
+    <div id="chatbot-container" class="w-full max-w-lg h-[90vh] bg-white rounded-xl shadow-2xl flex flex-col overflow-hidden">
+        
+        <!-- Header -->
+        <header class="p-4 bg-primary-blue text-white shadow-md flex items-center justify-between">
+            <h1 class="text-xl font-bold flex items-center">
+                <!-- Medical Theme Icon -->
+                <i data-lucide="stethoscope" class="w-6 h-6 mr-3"></i>
+                MediBot Secure AI
+            </h1>
+            <div class="flex items-center space-x-2">
+                <!-- Status indicator for Python Backend connection -->
+                <span id="status-dot" class="block w-3 h-3 bg-red-400 rounded-full animate-pulse"></span>
+                <span class="text-sm" id="status-text">Backend Disconnected</span>
+            </div>
+        </header>
+
+        <!-- Feature Buttons -->
+        <div class="p-2 border-b border-gray-200 bg-gray-50 flex justify-around space-x-2">
+            <button onclick="summarizeChat()" id="summarize-btn" class="flex items-center justify-center px-3 py-2 text-xs bg-primary-blue text-white font-semibold rounded-lg hover:bg-opacity-90 transition disabled:opacity-50 shadow-sm active:shadow-inner">
+                ✨ Summarize Chat
+            </button>
+            <button onclick="analyzeSymptoms()" id="analyze-btn" class="flex items-center justify-center px-3 py-2 text-xs bg-secondary-green text-primary-blue font-semibold rounded-lg hover:bg-opacity-80 transition disabled:opacity-50 shadow-sm active:shadow-inner">
+                ✨ Analyze Symptoms
+            </button>
+        </div>
+
+        <!-- Chat Messages Container -->
+        <main id="chat-messages" class="flex-grow p-4 overflow-y-auto chat-container space-y-4">
+            <!-- Initial Bot Message -->
+            <div class="flex justify-start message-animation">
+                <div class="max-w-xs p-3 rounded-lg bg-bubble-bot shadow-md border border-gray-200">
+                    <p class="text-sm font-semibold text-primary-blue">MediBot</p>
+                    <p class="text-gray-800 mt-1">Hello! I am MediBot, your secure AI assistant. **Please remember that I am not a doctor and cannot provide a diagnosis or treatment plan.** I am here to assist you with general health-related questions.</p>
+                </div>
+            </div>
+        </main>
+
+        <!-- Input Area -->
+        <footer class="p-4 border-t border-gray-200 flex space-x-3">
+            <input type="text" id="user-input" placeholder="Ask about health or symptoms..." class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue transition duration-150 shadow-inner" onkeydown="handleKey(event)">
+            <button id="send-button" onclick="sendMessage()" class="px-6 py-3 bg-secondary-green text-primary-blue font-bold rounded-lg hover:bg-opacity-80 transition duration-150 shadow-md active:shadow-sm disabled:opacity-50">
+                Send
+            </button>
+        </footer>
+    </div>
+
+    <script>
+        const chatMessages = document.getElementById('chat-messages');
+        const userInput = document.getElementById('user-input');
+        const sendButton = document.getElementById('send-button');
+        const summarizeBtn = document.getElementById('summarize-btn');
+        const analyzeBtn = document.getElementById('analyze-btn');
+        const statusDot = document.getElementById('status-dot');
+        const statusText = document.getElementById('status-text');
+        
+        // Store chat history to send for summarization
+        const chatHistory = [];
+
+        // **IMPORTANT:** API Endpoints pointing to your Python Flask backend
+        const API_ENDPOINT_CHAT = 'http://localhost:5000/api/chat'; 
+        const API_ENDPOINT_SUMMARIZE = 'http://localhost:5000/api/summarize';
+        const API_ENDPOINT_ANALYZE = 'http://localhost:5000/api/analyze';
+        
+        // --- Helper Function for Sticker/Icon Simulation ---
+        function getMedicalIcon(text) {
+            const lowerText = text.toLowerCase();
+            if (lowerText.includes('fever') || lowerText.includes('बुखार')) return '🤒';
+            if (lowerText.includes('appointment')) return '🗓️';
+            if (lowerText.includes('cough') || lowerText.includes('खाँसी')) return '🤧';
+            if (lowerText.includes('medicine') || lowerText.includes('दवा')) return '💊';
+            if (lowerText.includes('emergency') || lowerText.includes('तुरंत')) return '🚨';
+            if (lowerText.includes('hydration') || lowerText.includes('पानी')) return '💧';
+            return '';
+        }
+
+        // --- Utility Functions ---
+
+        // Function to create and append a message bubble
+        function appendMessage(text, sender, isSystem = false) {
+            const messageWrapper = document.createElement('div');
+            messageWrapper.className = `flex ${sender === 'user' ? 'justify-end' : 'justify-start'} message-animation`;
+
+            const messageBubble = document.createElement('div');
+            
+            let bubbleClasses = `max-w-xs p-3 rounded-xl shadow-md `;
+
+            if (isSystem) {
+                 // Special styling for system messages (Summary, Analysis)
+                bubbleClasses += 'bg-yellow-100 text-gray-800 border-l-4 border-yellow-500';
+            } else if (sender === 'user') {
+                bubbleClasses += 'bg-bubble-user text-gray-800';
+            } else {
+                bubbleClasses += 'bg-bubble-bot text-gray-800 border border-gray-200';
+            }
+
+            messageBubble.className = bubbleClasses;
+            
+            if (sender === 'bot' || isSystem) {
+                const botName = document.createElement('p');
+                botName.className = 'text-sm font-semibold text-primary-blue mb-1 flex items-center';
+                botName.textContent = isSystem ? 'System Analysis' : 'MediBot';
+
+                // STICKER/ICON SIMULATION: Add icon based on response content
+                const icon = getMedicalIcon(text);
+                if (icon) {
+                    const iconSpan = document.createElement('span');
+                    iconSpan.textContent = icon;
+                    iconSpan.className = 'text-lg ml-2'; // Styling for the emoji/sticker
+                    botName.appendChild(iconSpan);
+                }
+                
+                messageBubble.appendChild(botName);
+            }
+
+            // Use innerHTML to allow for formatting
+            const textContent = document.createElement('p');
+            textContent.className = 'text-gray-800';
+            textContent.innerHTML = text;
+            messageBubble.appendChild(textContent);
+
+            messageWrapper.appendChild(messageBubble);
+            chatMessages.appendChild(messageWrapper);
+            
+            // Scroll to the bottom of the chat
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            // Update chat history only for regular messages
+            if (!isSystem) {
+                chatHistory.push({ role: sender, text: text });
+            }
+        }
+
+        // --- Core Chat Functionality (Calls Python Backend) ---
+
+        async function fetchAIResponse(endpoint, data, thinkingMessage, systemMessage = false) {
+            
+            // Disable all interactive elements
+            setInteractiveState(false);
+            const botThinkingId = appendThinkingIndicator(thinkingMessage);
+
+            try {
+                // Status update for connection attempt
+                statusDot.classList.remove('bg-red-400');
+                statusDot.classList.add('bg-yellow-400', 'animate-ping');
+                statusText.textContent = 'Connecting...';
+
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data) 
+                });
+
+                // Status update for connected
+                statusDot.classList.remove('bg-yellow-400', 'animate-ping');
+                statusDot.classList.add('bg-green-400', 'animate-pulse');
+                statusText.textContent = 'Backend Connected';
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const responseData = await response.json();
+                let botResponseText;
+
+                if (endpoint === API_ENDPOINT_ANALYZE) {
+                    // Special handling for structured JSON response from Analyze API
+                    const analysis = responseData.analysis;
+                    if (analysis && analysis.category && analysis.recommendation) {
+                        botResponseText = `
+                            **Symptom Analysis Complete:**<br>
+                            - **Category:** <span class="text-red-600">${analysis.category}</span><br>
+                            - **Reasoning:** ${analysis.reasoning}<br>
+                            - **Recommendation:** ${analysis.recommendation}
+                        `;
+                    } else {
+                         botResponseText = "Analysis failed or returned an unexpected format.";
+                    }
+                } else {
+                    // Regular text response
+                    botResponseText = responseData.response || "Sorry, no response was received from the AI model.";
+                }
+                
+                // Remove thinking indicator and display bot response
+                removeThinkingIndicator(botThinkingId);
+                appendMessage(botResponseText, 'bot', systemMessage);
+                
+            } catch (error) {
+                console.error('API Error:', error);
+                
+                // Status update for disconnected
+                statusDot.classList.remove('bg-yellow-400', 'bg-green-400', 'animate-pulse');
+                statusDot.classList.add('bg-red-400');
+                statusText.textContent = 'Backend Disconnected';
+
+                removeThinkingIndicator(botThinkingId);
+                appendMessage(`**Network Error:** Could not connect to the chatbot backend. Please ensure the Python service is running at ${endpoint}.`, 'bot', true);
+
+            } finally {
+                // Re-enable all interactive elements
+                setInteractiveState(true);
+            }
+        }
+
+        async function sendMessage() {
+            const message = userInput.value.trim();
+            if (message === '') return;
+
+            // Display user message
+            appendMessage(message, 'user');
+            userInput.value = '';
+            
+            // Call the standard chat endpoint
+            await fetchAIResponse(
+                API_ENDPOINT_CHAT, 
+                { query: message, history: chatHistory }, 
+                'AI is generating a response...'
+            );
+        }
+
+        // --- Feature Functions ---
+
+        async function summarizeChat() {
+            if (chatHistory.length < 2) {
+                appendMessage("Please have a meaningful conversation (at least one exchange) before requesting a summary.", 'bot', true);
+                return;
+            }
+            await fetchAIResponse(
+                API_ENDPOINT_SUMMARIZE, 
+                { history: chatHistory }, 
+                'AI is summarizing the conversation...',
+                true
+            );
+        }
+
+        async function analyzeSymptoms() {
+            if (chatHistory.length < 2) {
+                appendMessage("Please describe your symptoms in the chat first so the AI can analyze them.", 'bot', true);
+                return;
+            }
+            // The AI will analyze the entire history for relevant symptom data
+            await fetchAIResponse(
+                API_ENDPOINT_ANALYZE, 
+                { history: chatHistory }, 
+                'AI is analyzing symptoms and category...',
+                true
+            );
+        }
+
+
+        // --- Helper for Thinking Indicator & State ---
+
+        function setInteractiveState(enabled) {
+            sendButton.disabled = !enabled;
+            userInput.disabled = !enabled;
+            summarizeBtn.disabled = !enabled;
+            analyzeBtn.disabled = !enabled;
+            if (enabled) {
+                userInput.focus();
+            }
+        }
+
+        let thinkingIndicatorInterval;
+        let thinkingIndicatorCount = 0;
+
+        function appendThinkingIndicator(message) {
+            const thinkingWrapper = document.createElement('div');
+            thinkingWrapper.id = 'bot-thinking';
+            thinkingWrapper.className = 'flex justify-start message-animation';
+            
+            const thinkingBubble = document.createElement('div');
+            thinkingBubble.className = 'max-w-xs p-3 rounded-xl bg-bubble-bot text-gray-500 shadow-md border border-gray-200';
+            
+            const botName = document.createElement('p');
+            botName.className = 'text-sm font-semibold text-primary-blue mb-1';
+            botName.textContent = 'MediBot';
+            
+            const thinkingText = document.createElement('p');
+            thinkingText.id = 'thinking-text';
+            thinkingText.textContent = message;
+            
+            thinkingBubble.appendChild(botName);
+            thinkingBubble.appendChild(thinkingText);
+            thinkingWrapper.appendChild(thinkingBubble);
+            chatMessages.appendChild(thinkingWrapper);
+
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            
+            // Animate the dots
+            thinkingIndicatorCount = 0;
+            thinkingIndicatorInterval = setInterval(() => {
+                const baseText = message.includes('...') ? message.replace(/\.+/g, '') : message;
+                thinkingText.textContent = baseText + '.'.repeat(thinkingIndicatorCount);
+                thinkingIndicatorCount = (thinkingIndicatorCount + 1) % 4;
+            }, 500);
+
+            return thinkingWrapper.id;
+        }
+
+        function removeThinkingIndicator(id) {
+            clearInterval(thinkingIndicatorInterval);
+            const indicator = document.getElementById(id);
+            if (indicator) {
+                indicator.remove();
+            }
+        }
+
+        // Allow sending message with Enter key
+        function handleKey(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+
+        // Initialize Lucide icons and focus input
+        window.onload = () => {
+            lucide.createIcons();
+            userInput.focus();
+        };
+
+    </script>
+</body>
+</html>
